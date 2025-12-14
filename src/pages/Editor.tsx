@@ -1,254 +1,93 @@
-import { useEffect, Suspense, useRef } from 'react';
-import { useParams } from 'react-router-dom';
-import { useEditorStore, Project, FurnitureItem, Wall } from '@/stores/editorStore';
-import { EditorToolbar } from '@/components/editor/EditorToolbar';
-import { ModelCatalog } from '@/components/editor/ModelCatalog';
-import { PropertiesPanel } from '@/components/editor/PropertiesPanel';
-import { Canvas, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment, useGLTF, TransformControls } from '@react-three/drei';
-import * as THREE from 'three';
+// Add this to your Editor.tsx - Enhanced keyboard controls
 
-// Default project template
-const createDefaultProject = (name: string): Project => ({
-  id: crypto.randomUUID(),
-  name,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  furniture: [],
-  walls: [],
-  roomWidth: 10,
-  roomDepth: 10,
-});
-
-function GLTFModel({ 
-  url, 
-  item, 
-  isSelected, 
-  onSelect 
-}: { 
-  url: string; 
-  item: FurnitureItem; 
-  isSelected: boolean; 
-  onSelect: () => void;
-}) {
-  const { scene } = useGLTF(url);
-  const clonedScene = scene.clone();
-  
-  return (
-    <primitive
-      object={clonedScene}
-      position={item.position}
-      rotation={item.rotation}
-      scale={item.scale}
-      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(); }}
-    />
-  );
-}
-
-function FallbackShape({ 
-  item, 
-  isSelected, 
-  onSelect 
-}: { 
-  item: FurnitureItem; 
-  isSelected: boolean; 
-  onSelect: () => void;
-}) {
-  return (
-    <mesh
-      position={item.position}
-      rotation={item.rotation}
-      scale={item.scale}
-      onClick={(e) => { e.stopPropagation(); onSelect(); }}
-      castShadow
-    >
-      {item.modelType === 'cylinder' ? (
-        <cylinderGeometry args={[0.5, 0.5, 1, 32]} />
-      ) : item.modelType === 'sphere' ? (
-        <sphereGeometry args={[0.5, 32, 32]} />
-      ) : (
-        <boxGeometry args={[1, 1, 1]} />
-      )}
-      <meshStandardMaterial 
-        color={item.color} 
-        emissive={isSelected ? item.color : '#000000'}
-        emissiveIntensity={isSelected ? 0.3 : 0}
-      />
-    </mesh>
-  );
-}
-
-function TransformableFurniture({ 
-  item, 
-  isSelected, 
-  onSelect,
-  activeTool,
-  onTransformEnd
-}: { 
-  item: FurnitureItem; 
-  isSelected: boolean; 
-  onSelect: () => void;
-  activeTool: string;
-  onTransformEnd: (position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
-}) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const groupRef = useRef<THREE.Group>(null);
-  
-  const getTransformMode = () => {
-    if (activeTool === 'move') return 'translate';
-    if (activeTool === 'rotate') return 'rotate';
-    if (activeTool === 'scale') return 'scale';
-    return 'translate';
-  };
-
-  const handleTransformEnd = () => {
-    if (groupRef.current) {
-      const pos = groupRef.current.position;
-      const rot = groupRef.current.rotation;
-      const scl = groupRef.current.scale;
-      onTransformEnd(
-        [pos.x, pos.y, pos.z],
-        [rot.x, rot.y, rot.z],
-        [scl.x, scl.y, scl.z]
-      );
+useEffect(() => {
+  const handleKeyDown = (e: KeyboardEvent) => {
+    // Prevent default for our shortcuts
+    const key = e.key.toLowerCase();
+    
+    // Tool switching
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      switch(key) {
+        case 'v':
+          setActiveTool('select');
+          e.preventDefault();
+          break;
+        case 'g':
+          setActiveTool('move');
+          e.preventDefault();
+          break;
+        case 'r':
+          setActiveTool('rotate');
+          e.preventDefault();
+          break;
+        case 's':
+          setActiveTool('scale');
+          e.preventDefault();
+          break;
+        case 'w':
+          setActiveTool('wall');
+          e.preventDefault();
+          break;
+        case 'escape':
+          setDrawingWall(false);
+          setWallStartPoint(null);
+          selectItem(null);
+          selectWall(null);
+          break;
+        case 'delete':
+        case 'backspace':
+          if (selectedItemId) {
+            removeFurniture(selectedItemId);
+          } else if (selectedWallId) {
+            removeWall(selectedWallId);
+          }
+          e.preventDefault();
+          break;
+      }
+    }
+    
+    // Grid toggle
+    if (e.altKey && key === 'g') {
+      toggleGrid();
+      e.preventDefault();
+    }
+    
+    // Duplicate selected item
+    if ((e.ctrlKey || e.metaKey) && key === 'd') {
+      if (selectedItemId && currentProject) {
+        const item = currentProject.furniture.find(f => f.id === selectedItemId);
+        if (item) {
+          addFurniture({
+            ...item,
+            position: [item.position[0] + 1, item.position[1], item.position[2] + 1]
+          });
+        }
+      }
+      e.preventDefault();
     }
   };
 
-  return (
-    <group ref={groupRef} position={item.position} rotation={item.rotation} scale={item.scale}>
-      {isSelected && (activeTool === 'move' || activeTool === 'rotate' || activeTool === 'scale') && (
-        <TransformControls 
-          mode={getTransformMode()} 
-          onMouseUp={handleTransformEnd}
-        >
-          <group>
-            {item.modelUrl ? (
-              <Suspense fallback={
-                <mesh ref={meshRef} castShadow>
-                  <boxGeometry args={[1, 1, 1]} />
-                  <meshStandardMaterial color={item.color} />
-                </mesh>
-              }>
-                <GLTFModelInner url={item.modelUrl} />
-              </Suspense>
-            ) : (
-              <mesh ref={meshRef} castShadow>
-                {item.modelType === 'cylinder' ? (
-                  <cylinderGeometry args={[0.5, 0.5, 1, 32]} />
-                ) : item.modelType === 'sphere' ? (
-                  <sphereGeometry args={[0.5, 32, 32]} />
-                ) : (
-                  <boxGeometry args={[1, 1, 1]} />
-                )}
-                <meshStandardMaterial 
-                  color={item.color} 
-                  emissive={item.color}
-                  emissiveIntensity={0.3}
-                />
-              </mesh>
-            )}
-          </group>
-        </TransformControls>
-      )}
-      
-      {(!isSelected || activeTool === 'select' || activeTool === 'wall') && (
-        <group onClick={(e) => { e.stopPropagation(); onSelect(); }}>
-          {item.modelUrl ? (
-            <Suspense fallback={
-              <mesh ref={meshRef} castShadow>
-                <boxGeometry args={[1, 1, 1]} />
-                <meshStandardMaterial color={item.color} />
-              </mesh>
-            }>
-              <GLTFModelInner url={item.modelUrl} />
-            </Suspense>
-          ) : (
-            <mesh ref={meshRef} castShadow>
-              {item.modelType === 'cylinder' ? (
-                <cylinderGeometry args={[0.5, 0.5, 1, 32]} />
-              ) : item.modelType === 'sphere' ? (
-                <sphereGeometry args={[0.5, 32, 32]} />
-              ) : (
-                <boxGeometry args={[1, 1, 1]} />
-              )}
-              <meshStandardMaterial 
-                color={item.color} 
-                emissive={isSelected ? item.color : '#000000'}
-                emissiveIntensity={isSelected ? 0.3 : 0}
-              />
-            </mesh>
-          )}
-        </group>
-      )}
-    </group>
-  );
-}
+  window.addEventListener('keydown', handleKeyDown);
+  return () => window.removeEventListener('keydown', handleKeyDown);
+}, [
+  setActiveTool, 
+  setDrawingWall, 
+  setWallStartPoint, 
+  selectedItemId, 
+  selectedWallId,
+  removeFurniture,
+  removeWall,
+  toggleGrid,
+  selectItem,
+  selectWall,
+  currentProject,
+  addFurniture
+]);
 
-function GLTFModelInner({ url }: { url: string }) {
-  const { scene } = useGLTF(url);
-  const clonedScene = scene.clone();
-  return <primitive object={clonedScene} />;
-}
 
-function WallMesh({ 
-  wall, 
-  isSelected, 
-  onSelect 
-}: { 
-  wall: Wall; 
-  isSelected: boolean; 
-  onSelect: () => void;
-}) {
-  const length = Math.sqrt(
-    Math.pow(wall.end[0] - wall.start[0], 2) + 
-    Math.pow(wall.end[1] - wall.start[1], 2)
-  );
-  
-  const centerX = (wall.start[0] + wall.end[0]) / 2;
-  const centerZ = (wall.start[1] + wall.end[1]) / 2;
-  
-  const angle = Math.atan2(wall.end[1] - wall.start[1], wall.end[0] - wall.start[0]);
-
-  return (
-    <mesh
-      position={[centerX, wall.height / 2, centerZ]}
-      rotation={[0, -angle, 0]}
-      onClick={(e) => { e.stopPropagation(); onSelect(); }}
-      castShadow
-      receiveShadow
-    >
-      <boxGeometry args={[length, wall.height, wall.thickness]} />
-      <meshStandardMaterial 
-        color={isSelected ? "#ff6b6b" : "#e0e0e0"} 
-        emissive={isSelected ? "#ff6b6b" : "#000000"}
-        emissiveIntensity={isSelected ? 0.2 : 0}
-      />
-    </mesh>
-  );
-}
-
-function WallPreview({ start, current }: { start: [number, number]; current: [number, number] }) {
-  const length = Math.sqrt(
-    Math.pow(current[0] - start[0], 2) + 
-    Math.pow(current[1] - start[1], 2)
-  );
-  
-  if (length < 0.1) return null;
-  
-  const centerX = (start[0] + current[0]) / 2;
-  const centerZ = (start[1] + current[1]) / 2;
-  const angle = Math.atan2(current[1] - start[1], current[0] - start[0]);
-
-  return (
-    <mesh
-      position={[centerX, 1.25, centerZ]}
-      rotation={[0, -angle, 0]}
-    >
-      <boxGeometry args={[length, 2.5, 0.15]} />
-      <meshStandardMaterial color="#06b6d4" transparent opacity={0.5} />
-    </mesh>
-  );
-}
+// ============================================
+// Enhanced Scene with Mouse Transform Controls
+// ============================================
 
 function Scene() {
   const { 
@@ -268,6 +107,7 @@ function Scene() {
   } = useEditorStore();
 
   const [previewPoint, setPreviewPoint] = React.useState<[number, number] | null>(null);
+  const controlsRef = useRef<any>(null);
 
   const handleFloorClick = (e: ThreeEvent<MouseEvent>) => {
     if (activeTool === 'wall') {
@@ -352,7 +192,7 @@ function Scene() {
         <WallPreview start={wallStartPoint} current={previewPoint} />
       )}
 
-      {/* Furniture */}
+      {/* Furniture with Transform Controls */}
       {currentProject?.furniture.map((item) => (
         <TransformableFurniture
           key={item.id}
@@ -365,6 +205,7 @@ function Scene() {
       ))}
 
       <OrbitControls 
+        ref={controlsRef}
         makeDefault 
         minDistance={5} 
         maxDistance={30} 
@@ -375,48 +216,17 @@ function Scene() {
   );
 }
 
-import React from 'react';
 
-export default function Editor() {
-  const { id } = useParams();
-  const { setCurrentProject, currentProject, setDrawingWall, setWallStartPoint } = useEditorStore();
+// ============================================
+// Store Updates - Add to editorStore.ts
+// ============================================
 
-  useEffect(() => {
-    if (id === 'new' || !currentProject) {
-      setCurrentProject(createDefaultProject('Untitled Room'));
-    }
-  }, [id, setCurrentProject, currentProject]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setDrawingWall(false);
-        setWallStartPoint(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setDrawingWall, setWallStartPoint]);
-
-  return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
-      <EditorToolbar />
-      
-      <div className="flex-1 flex overflow-hidden">
-        <ModelCatalog />
-        
-        <div className="flex-1 relative bg-background">
-          <Canvas shadows camera={{ position: [10, 10, 10], fov: 50 }}>
-            <Scene />
-          </Canvas>
-          
-          <div className="absolute bottom-4 left-4 glass rounded-lg px-4 py-2 text-xs text-muted-foreground">
-            <span className="font-medium">Controls:</span> Drag to rotate • Scroll to zoom • Right-click to pan • ESC to cancel wall
-          </div>
-        </div>
-        
-        <PropertiesPanel />
-      </div>
-    </div>
-  );
+interface EditorStore {
+  // ... existing properties
+  activeTool: 'select' | 'move' | 'rotate' | 'scale' | 'wall';
+  setActiveTool: (tool: 'select' | 'move' | 'rotate' | 'scale' | 'wall') => void;
 }
+
+// In your store:
+activeTool: 'select',
+setActiveTool: (tool) => set({ activeTool: tool }),
