@@ -51,6 +51,7 @@ export function ModelCatalog() {
       scale,
       modelType: model.model_type as 'box' | 'cylinder' | 'sphere',
       color: model.default_color,
+      modelUrl: model.model_url,
     });
   };
 
