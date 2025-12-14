@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useParams } from 'react-router-dom';
-import { useEditorStore, Project } from '@/stores/editorStore';
+import { useEditorStore, Project, FurnitureItem } from '@/stores/editorStore';
 import { EditorToolbar } from '@/components/editor/EditorToolbar';
 import { ModelCatalog } from '@/components/editor/ModelCatalog';
 import { PropertiesPanel } from '@/components/editor/PropertiesPanel';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment } from '@react-three/drei';
+import { OrbitControls, Grid, Environment, useGLTF } from '@react-three/drei';
 import { useEditorStore as useStore } from '@/stores/editorStore';
 
 // Default project template
@@ -20,7 +20,22 @@ const createDefaultProject = (name: string): Project => ({
   roomDepth: 10,
 });
 
-function FurnitureItem({ item, isSelected, onSelect }: { item: any; isSelected: boolean; onSelect: () => void }) {
+function GLTFModel({ url, item, isSelected, onSelect }: { url: string; item: FurnitureItem; isSelected: boolean; onSelect: () => void }) {
+  const { scene } = useGLTF(url);
+  const clonedScene = scene.clone();
+  
+  return (
+    <primitive
+      object={clonedScene}
+      position={item.position}
+      rotation={item.rotation}
+      scale={item.scale}
+      onClick={(e: any) => { e.stopPropagation(); onSelect(); }}
+    />
+  );
+}
+
+function FallbackShape({ item, isSelected, onSelect }: { item: FurnitureItem; isSelected: boolean; onSelect: () => void }) {
   return (
     <mesh
       position={item.position}
@@ -43,6 +58,18 @@ function FurnitureItem({ item, isSelected, onSelect }: { item: any; isSelected: 
       />
     </mesh>
   );
+}
+
+function FurnitureItemComponent({ item, isSelected, onSelect }: { item: FurnitureItem; isSelected: boolean; onSelect: () => void }) {
+  if (item.modelUrl) {
+    return (
+      <Suspense fallback={<FallbackShape item={item} isSelected={isSelected} onSelect={onSelect} />}>
+        <GLTFModel url={item.modelUrl} item={item} isSelected={isSelected} onSelect={onSelect} />
+      </Suspense>
+    );
+  }
+  
+  return <FallbackShape item={item} isSelected={isSelected} onSelect={onSelect} />;
 }
 
 function Scene() {
@@ -73,7 +100,7 @@ function Scene() {
 
       {/* Furniture */}
       {currentProject?.furniture.map((item) => (
-        <FurnitureItem
+        <FurnitureItemComponent
           key={item.id}
           item={item}
           isSelected={selectedItemId === item.id}

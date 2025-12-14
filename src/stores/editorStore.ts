@@ -9,6 +9,7 @@ export interface FurnitureItem {
   scale: [number, number, number];
   modelType: 'box' | 'cylinder' | 'sphere';
   color: string;
+  modelUrl?: string | null;
 }
 
 export interface Wall {
